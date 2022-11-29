@@ -1,4 +1,4 @@
-import { AxiosInstance } from "axios";
+import { AxiosError, AxiosInstance } from "axios";
 import { stringify } from "querystring";
 import { MemoryCookieStore, Cookie } from "tough-cookie";
 import { AC } from "./anti-captcha";
@@ -72,13 +72,27 @@ export class Site {
     return response.data;
   }
 
-  async confirmWaitingAppointments(id: string){
-    const payload = {
-      ids: id,
-      captcha: await this.ac.solveImage()
+  private async tryConfirmWaitingAppointments(id: string, tries: number) : Promise<Confirmation | undefined>{ 
+    try {
+      const payload = {
+        ids: id,
+        captcha: await this.ac.solveImage()
+      }
+      const response = await this.client.post<Confirmation>("/ru/Appointments/ConfirmWaitingAppointments", stringify(payload));
+      return response.data;
     }
-    const response = await this.client.post<Confirmation>("/ru/Appointments/ConfirmWaitingAppointments", stringify(payload));
-    return response.data;
+    catch(e: AxiosError | any) {
+      if(tries > 0) {
+        log(e?.message);
+        log("Confirm failed, retrying");
+        
+        return await this.tryConfirmWaitingAppointments(id, tries - 1);
+      }
+    }
+  }
+
+  async confirmWaitingAppointments(id: string){
+    return this.tryConfirmWaitingAppointments(id, 3)
   }
 
   async getMonthSchedule() {

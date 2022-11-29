@@ -6,6 +6,7 @@ import { wrapper } from "axios-cookiejar-support";
 import { CookieJar, MemoryCookieStore } from "tough-cookie";
 import { Site } from "./site";
 import { log } from "./log";
+import { TG } from './tg'
 
 const cookies = fs.existsSync("./cookie.json") && require("../cookie.json");
 
@@ -31,6 +32,13 @@ if (!AC_TOKEN) {
 const ac = new AC(AC_TOKEN, instance);
 const site = new Site(instance, cookieStrorage, ac);
 
+const tg = process.env.TG_TOKEN && process.env.TG_CHATS ? new TG(process.env.TG_TOKEN, process.env.TG_CHATS.split(',')) : undefined;
+
+class LastRunError extends Error {
+  constructor() {
+    super("Last run was less than 24 hours ago");
+  }
+}
 
 const checkLastRun = () => {
   const LASTRUN_FILENAME = './lastrun';
@@ -38,7 +46,7 @@ const checkLastRun = () => {
   if(fs.existsSync(LASTRUN_FILENAME)) {
     const content = fs.readFileSync(LASTRUN_FILENAME, 'utf8');
     if(Date.now() - parseInt(content) < 1000 * 60 * 60 * 24 + 1000 * 60 * 10) {
-      throw new Error('Last run was less than 24 hours ago, exiting');
+      throw new LastRunError();
     }
   }
   
@@ -49,7 +57,6 @@ const main = async () => {
   checkLastRun();
 
   await site.login(process.env.EMAIL!, process.env.PASSWORD!);
-  log(jar.toJSON());
 
   const schedule = await site.getMonthSchedule();
   if(schedule.AvailableSlots > 0){
@@ -70,11 +77,18 @@ const main = async () => {
   }
 
   const confirmation = await site.confirmWaitingAppointments(appointment.Id);
-  if(!confirmation.IsSuccessful){
-    throw new Error(`${confirmation.ErrorMessage}`);
+  if(!confirmation?.IsSuccessful){
+    throw new Error(`${confirmation?.ErrorMessage}`);
   }
+
+  tg?.send(`Confirmed appointment\nPlaceInQueue: ${appointment.PlaceInQueue}`);
 
   log("Appointment confirmed");
 };
 
-main().catch(console.error);
+main().catch(err => {
+  if(!(err instanceof LastRunError)) {
+    log(err.message)
+    tg?.send(`Error\n${err.message}`);
+  } 
+});
